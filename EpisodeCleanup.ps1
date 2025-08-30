@@ -19,13 +19,13 @@ param(
   [Parameter(Mandatory=$true)]
   [string]$RootPath,
 
-  [switch]$DryRun,
-
   [Parameter(Mandatory=$false)]
   [string]$LogFolder,
 
   [Parameter(Mandatory=$false)]
-  [string]$ShowNameStartsWith
+  [string]$ShowNameStartsWith,
+
+  [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -53,8 +53,8 @@ if ([string]::IsNullOrWhiteSpace($LogFolder)) {
   if ($IsWindows) {
     $LogDir = 'C:\istools'
   } else {
-    $home = $env:HOME; if (-not $home) { $home = '~' }
-    $LogDir = Join-Path $home '.local/state/episodecleanup'
+    $homeDir= $env:HOME; if (-not $home) { $homeDir= '~' }
+    $LogDir = Join-Path $homeDir'.local/state/episodecleanup'
   }
 } else {
   $LogDir = $LogFolder
