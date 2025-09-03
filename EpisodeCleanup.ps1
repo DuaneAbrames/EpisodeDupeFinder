@@ -13,11 +13,10 @@ Usage examples:
   .\EpisodeCleanup.ps1 -RootPath "." 
 
 #>
-
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)]
-  [string]$RootPath,
+  [string]$RootPath = 'R:\TV Shows',
 
   [Parameter(Mandatory=$false)]
   [string]$LogFolder,
@@ -28,6 +27,8 @@ param(
   [switch]$DryRun
 )
 
+$DryRun = $true
+#$RootPath = 'R:\TV Shows'
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -176,7 +177,9 @@ function Get-RelativePath {
   try {
     $uBase = [Uri]$baseFixed
     $uFull = [Uri]$FullPath
-    $rel = $uBase.MakeRelativeUri($uFull).ToString()
+    $relUri = $uBase.MakeRelativeUri($uFull)
+    $rel = $relUri.ToString()
+    $rel = [Uri]::UnescapeDataString($rel)
     return ($rel -replace '/', $sep)
   } catch {
     if ($FullPath.StartsWith($baseFixed, [StringComparison]::OrdinalIgnoreCase)) {
@@ -192,13 +195,6 @@ function Get-DeletionsPathForItem {
   return (Join-Path $script:DeletionsRoot $rel)
 }
 
-function Ensure-ParentDirectory {
-  param([string]$TargetPath)
-  $parent = Split-Path -LiteralPath $TargetPath -Parent
-  if (-not (Test-Path -LiteralPath $parent)) {
-    New-Item -ItemType Directory -Path $parent -Force | Out-Null
-  }
-}
 
 function Format-Size {
   param([long]$Bytes)
@@ -238,7 +234,7 @@ function Get-MediaInfoSummary {
   if (-not $vcodec -and $vid.CodecID) { $vcodec = $vid.CodecID }
   $acodec = $aud.Format
   if (-not $acodec -and $aud.CodecID) { $acodec = $aud.CodecID }
-  $channels = $aud.'Channel(s)'
+  $channels = $aud.'Channels'
   if (-not $channels) { $channels = $aud.'Channel_s_' }
   if (-not $channels -and $aud.Channels) { $channels = $aud.Channels }
 
@@ -283,7 +279,7 @@ if ([System.IO.Path]::GetPathRoot($RootFull) -eq $RootFull -or $RootFull -match 
 }
 
 # Deletions root is a sibling folder of the RootPath
-$script:RelBase = Split-Path -LiteralPath $RootFull -Parent
+$script:RelBase = Split-Path -LiteralPath $RootFull 
 $script:DeletionsRoot = Join-Path $script:RelBase 'Deletions'
 
 Write-Host "Processing shows..."
@@ -322,13 +318,13 @@ if ($ShowNameStartsWith) {
 $showIndex = 0
 $totalShows = [math]::Max(1,$shows.Count)
 $totalSeasonCount = 0
-$shows = $shows | ?{$_.name -like "I*"}
+#$shows = $shows | ?{$_.name -like "I*"}
 foreach ($show in $shows) {
   try {
     $showIndex++
     $pctShow = [int](($showIndex / $totalShows) * 100)
     Write-Progress -Activity 'Processing shows' -Status $show.FullName -PercentComplete $pctShow
-    Write-host $show.FullName
+    #Write-host $show.FullName
     $seasonDirs = @(Get-SeasonFoldersForShow -ShowDir $show)
     $totalSeasonCount += $seasonDirs.Count
 
@@ -364,11 +360,11 @@ foreach ($show in $shows) {
         }
         foreach ($kv in $byEpisode.GetEnumerator()) {
           if ($kv.Value.Count -gt 1) {
-            $duplicateGroups.Add([pscustomobject]@{
+            [void]$duplicateGroups.Add([object]([pscustomobject]@{
               Folder = $seasonDir
               EpisodeKey = $kv.Key
-              Files = @($kv.Value)
-            })
+              Files = $kv.Value.ToArray()
+            }))
           }
         }
 
@@ -395,11 +391,11 @@ Write-Log -Message ("Duplicate groups: {0}; Misplaced episodes: {1}; Empty leaf 
 # Determine parent folders where all non-extras children are empty and can be moved entirely
 $parentsToDelete = New-Object System.Collections.Generic.HashSet[string]
 if ($emptyLeafDirs.Count -gt 0) {
-  $byParent = $emptyLeafDirs | Group-Object { $_.Parent.FullName }
+  $byParent = @($emptyLeafDirs | Group-Object { $_.Parent.FullName })
   foreach ($grp in $byParent) {
     $parentPath = $grp.Name
-    $allChildren = Get-ChildItem -LiteralPath $parentPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object { -not (Test-IsExtrasFolderName -Name $_.Name) }
-    if (-not $allChildren -or $allChildren.Count -eq 0) { continue }
+    $allChildren = @(Get-ChildItem -LiteralPath $parentPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object { -not (Test-IsExtrasFolderName -Name $_.Name) })
+    if ($allChildren.Count -eq 0) { continue }
     $allEmpty = $true
     foreach ($child in $allChildren) {
       if (-not ($emptyLeafDirs | Where-Object { $_.FullName -eq $child.FullName })) { $allEmpty = $false; break }
@@ -462,7 +458,6 @@ if ($duplicateGroups.Count -gt 0) {
       if ($n -gt 0 -and $n -le $choices.Count) {
         $toDelete = $choices[$n-1]
         $dest = Get-DeletionsPathForItem -FullPath $toDelete.FullName
-        Ensure-ParentDirectory -TargetPath $dest
         if ($DryRun) {
           Write-Log -Message ("DRY RUN: Move duplicate to Deletions: '{0}' -> '{1}'" -f $toDelete.FullName, $dest) -Level Info
         } else {
@@ -494,7 +489,6 @@ if ($misplacedEpisodes.Count -gt 0) {
         Write-Log -Message ("DRY RUN: Move misplaced: '{0}' -> '{1}'" -f $src, $dst) -Level Info
       } else {
         Write-Log -Message ("Moving misplaced: '{0}' -> '{1}'" -f $src, $dst) -Level Info
-        Ensure-ParentDirectory -TargetPath $dst
         Move-Item -LiteralPath $src -Destination $dst -Force
       }
       if (-not $applyAll) {
@@ -520,7 +514,6 @@ if ($finalFoldersToDelete.Count -gt 0) {
     $ok = Confirm-YesNo -Prompt 'Move this folder to Deletions?' -DefaultYes:$false
     if ($ok) {
       $dest = Get-DeletionsPathForItem -FullPath $folderPath
-      Ensure-ParentDirectory -TargetPath $dest
       if ($DryRun) {
         Write-Log -Message ("DRY RUN: Move folder to Deletions: '{0}' -> '{1}'" -f $folderPath, $dest) -Level Info
       } else {
