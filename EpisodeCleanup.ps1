@@ -330,7 +330,7 @@ foreach ($show in $shows) {
 
     foreach ($seasonDir in $seasonDirs) {
       try {
-        Write-Progress -Activity "Analyzing seasons in $($show.Name)" -Status $seasonDir.FullName -PercentComplete 0
+        #Write-Progress -Activity "Analyzing seasons in $($show.Name)" -Status $seasonDir.FullName -PercentComplete 0
 
         $folderSeason = Parse-SeasonFromFolderName -FolderName $seasonDir.Name
         $showRoot = $show
